@@ -945,8 +945,8 @@
         <select id="filter-status" class="form-input" style="width:120px;padding:8px 32px 8px 10px;font-size:13px;" onchange="filterBooks()">
           <option value="">Tout</option>
           <option value="à lire">À lire</option>
-          <option value="en cours">En cours</option>
-          <option value="lu">Lu</option>
+          <option value="en cours">📖 En cours</option>
+          <option value="lu">✅ Lu</option>
         </select>
       </div>
       <div id="book-list"></div>
@@ -959,11 +959,12 @@
       </div>
 
       <div id="isbn-manual-row">
-        <input type="text" class="form-input" id="isbn-manual" placeholder="Ou saisir ISBN (13 chiffres)" inputmode="numeric" pattern="[0-9]*">
+        <input type="text" class="form-input" id="isbn-manual" placeholder="Ou saisir ISBN (13 chiffres)" inputmode="numeric" pattern="[0-9]*"
+          onkeydown="if(event.key==='Enter') lookupManualISBN()">
         <button class="btn btn-secondary" onclick="lookupManualISBN()">→</button>
       </div>
 
-      <!-- Camera view (hidden until activated) -->
+      <!-- Camera view -->
       <div id="camera-container" style="display:none">
         <video id="camera-video" autoplay muted playsinline></video>
         <div class="scan-overlay">
@@ -972,56 +973,63 @@
         <div id="scan-hint">Centre le code-barres dans le cadre</div>
       </div>
       <div id="camera-controls" style="display:none;gap:8px;padding:0.5rem 1rem;background:var(--surface2)">
-        <button class="btn btn-danger btn-full" onclick="stopCamera()">✕ Arrêter la caméra</button>
+        <button class="btn btn-danger btn-full" onclick="stopCamera()">Arreter la camera</button>
       </div>
 
-      <div id="add-form" class="hidden">
-        <div id="book-preview-container"></div>
+      <!-- AUTO-SAVE PREVIEW CARD -->
+      <div id="auto-preview" style="display:none;flex-direction:column;padding:1rem;gap:0.75rem;overflow-y:auto">
 
-        <p class="form-section-title">Informations</p>
-        <div class="form-field">
-          <label class="form-label">ISBN</label>
-          <input class="form-input" type="text" id="f-isbn" placeholder="9782..." inputmode="numeric" readonly>
-        </div>
-        <div class="form-field">
-          <label class="form-label">Titre</label>
-          <input class="form-input" type="text" id="f-title" placeholder="Titre du livre">
-        </div>
-        <div class="form-field">
-          <label class="form-label">Auteur</label>
-          <input class="form-input" type="text" id="f-author" placeholder="Prénom Nom">
-        </div>
-        <div class="form-field">
-          <label class="form-label">Éditeur</label>
-          <input class="form-input" type="text" id="f-publisher" placeholder="Éditeur">
-        </div>
-        <div class="form-field">
-          <label class="form-label">Année</label>
-          <input class="form-input" type="text" id="f-year" placeholder="2024" inputmode="numeric">
-        </div>
-        <div class="form-field">
-          <label class="form-label">Statut de lecture</label>
-          <select class="form-input" id="f-status">
-            <option value="à lire">📌 À lire</option>
-            <option value="en cours">📖 En cours de lecture</option>
-            <option value="lu">✅ Lu</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label">Notes personnelles</label>
-          <textarea class="form-input" id="f-notes" placeholder="Avis, page où j'en suis…"></textarea>
+        <!-- Carte livre -->
+        <div id="auto-preview-card" style="
+          background:var(--surface2);border:1px solid var(--border2);
+          border-radius:var(--radius);padding:1rem;
+          display:flex;gap:14px;align-items:center;position:relative;overflow:hidden">
+          <div id="auto-countdown-bar" style="
+            position:absolute;bottom:0;left:0;height:3px;
+            background:var(--accent);width:100%;transition:width linear"></div>
+          <div id="auto-cover" style="flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div id="auto-title" style="font-size:15px;font-weight:700;margin-bottom:3px;line-height:1.3"></div>
+            <div id="auto-author" style="font-size:13px;color:var(--text2);margin-bottom:4px"></div>
+            <div id="auto-meta" style="font-size:12px;color:var(--text3);font-family:var(--font-mono)"></div>
+          </div>
         </div>
 
-        <div style="display:flex;gap:8px;margin-top:0.5rem;padding-bottom:1rem">
-          <button class="btn btn-secondary" style="flex:1" onclick="resetAddForm()">Annuler</button>
-          <button class="btn btn-primary" style="flex:1" onclick="saveBook()">💾 Enregistrer</button>
+        <!-- Statut rapide -->
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Statut de lecture</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="status-chip active-alire"  id="sc-alire"   onclick="setAutoStatus('à lire')">📌 À lire</button>
+            <button class="status-chip"               id="sc-encours" onclick="setAutoStatus('en cours')">📖 En cours</button>
+            <button class="status-chip"               id="sc-lu"      onclick="setAutoStatus('lu')">✅ Lu</button>
+          </div>
         </div>
+
+        <!-- Countdown + boutons -->
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="auto-countdown-label" style="flex:1;font-size:13px;color:var(--text3)">Enregistrement dans <strong id="auto-sec">3</strong>s...</div>
+          <button class="btn btn-danger"    style="padding:8px 14px;font-size:13px" onclick="cancelAutoSave()">Annuler</button>
+          <button class="btn btn-primary"   style="padding:8px 14px;font-size:13px" onclick="confirmAutoSave()">Maintenant</button>
+        </div>
+
+        <!-- Champs manuels si ISBN inconnu -->
+        <div id="auto-manual-fields" style="display:none;flex-direction:column;gap:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+          <div style="font-size:12px;color:var(--text3)">ISBN inconnu - completer manuellement :</div>
+          <input class="form-input" type="text" id="f-title"     placeholder="Titre *">
+          <input class="form-input" type="text" id="f-author"    placeholder="Auteur">
+          <input class="form-input" type="text" id="f-publisher" placeholder="Editeur">
+          <input class="form-input" type="text" id="f-year"      placeholder="Annee" inputmode="numeric">
+        </div>
+
+        <!-- Champs caches -->
+        <input type="hidden" id="f-isbn">
       </div>
 
+      <!-- ETAT VIDE -->
       <div id="add-empty" style="display:flex;flex-direction:column;align-items:center;padding:2rem 1rem;gap:0.5rem;text-align:center;color:var(--text3)">
         <div style="font-size:36px;margin-bottom:0.5rem">📷</div>
         <div style="font-size:15px;font-weight:600;color:var(--text2)">Scanner ou saisir un ISBN</div>
-        <div style="font-size:13px">Les infos du livre se remplissent automatiquement</div>
+        <div style="font-size:13px">Recherche automatique · apercu 3s · sauvegarde</div>
       </div>
     </div>
 
@@ -1038,7 +1046,7 @@
         </div>
         <div class="stat-card">
           <div class="stat-val amber" id="stat-encours">0</div>
-          <div class="stat-label">En cours</div>
+          <div class="stat-label">📖 En cours</div>
         </div>
         <div class="stat-card">
           <div class="stat-val" id="stat-alire">0</div>
@@ -1453,14 +1461,33 @@ function lookupManualISBN() {
 }
 
 // ══════════════════════════════════════════════
-// OPEN LIBRARY LOOKUP
+// OPEN LIBRARY LOOKUP + AUTO-SAVE
 // ══════════════════════════════════════════════
+let autoSaveTimer = null;
+let autoSaveData = null;
+let autoStatus = 'à lire';
+const AUTO_DELAY = 3000; // ms
+
 async function lookupISBN(isbn) {
+  cancelAutoSave();
   setSyncStatus('busy', 'Recherche ISBN…');
+
+  // Afficher l'aperçu immédiatement
   document.getElementById('add-empty').style.display = 'none';
-  document.getElementById('add-form').classList.remove('hidden');
-  document.getElementById('book-preview-container').innerHTML = '';
+  document.getElementById('auto-preview').style.display = 'flex';
+  document.getElementById('auto-manual-fields').style.display = 'none';
+  document.getElementById('auto-title').textContent = 'Recherche en cours…';
+  document.getElementById('auto-author').textContent = '';
+  document.getElementById('auto-meta').textContent = isbn;
+  document.getElementById('auto-cover').innerHTML = '<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid var(--border)">⏳</div>';
   currentCoverUrl = '';
+  autoStatus = 'à lire';
+  updateStatusChips();
+
+  // Reset countdown bar
+  const bar = document.getElementById('auto-countdown-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
 
   try {
     const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
@@ -1469,59 +1496,136 @@ async function lookupISBN(isbn) {
     const book = data[key];
 
     if (book) {
-      document.getElementById('f-title').value = book.title || '';
-      document.getElementById('f-author').value = book.authors ? book.authors.map(a => a.name).join(', ') : '';
-      document.getElementById('f-publisher').value = book.publishers ? book.publishers.map(p => p.name).join(', ') : '';
-      document.getElementById('f-year').value = book.publish_date ? book.publish_date.match(/\d{4}/)?.[0] || '' : '';
-
-      const cover = book.cover?.large || book.cover?.medium || book.cover?.small || '';
+      const title     = book.title || '';
+      const author    = book.authors    ? book.authors.map(a => a.name).join(', ')    : '';
+      const publisher = book.publishers ? book.publishers.map(p => p.name).join(', ') : '';
+      const year      = book.publish_date ? (book.publish_date.match(/\d{4}/)?.[0] || '') : '';
+      const cover     = book.cover?.large || book.cover?.medium || book.cover?.small || '';
       currentCoverUrl = cover;
 
-      if (cover || book.title) {
-        document.getElementById('book-preview-container').innerHTML = `
-          <div class="book-preview">
-            ${cover ? `<img src="${cover}" alt="">` : `<div style="font-size:28px">📘</div>`}
-            <div class="book-preview-info">
-              <div class="book-preview-title">${esc(book.title || isbn)}</div>
-              <div class="book-preview-author">${esc(book.authors ? book.authors.map(a => a.name).join(', ') : '—')}</div>
-            </div>
-          </div>`;
-      }
+      // Remplir l'aperçu
+      document.getElementById('auto-title').textContent  = title || isbn;
+      document.getElementById('auto-author').textContent = author || '—';
+      document.getElementById('auto-meta').textContent   = [publisher, year].filter(Boolean).join(' · ') || isbn;
+      document.getElementById('auto-cover').innerHTML = cover
+        ? `<img src="${cover}" style="width:46px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border)">`
+        : `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">📘</div>`;
+
+      // Stocker le payload
+      autoSaveData = { isbn, title, author, publisher, year };
       setSyncStatus('ok', 'Livre trouvé ✓');
-      toast('📚 ' + (book.title || 'Livre trouvé'));
+      startCountdown();
+
     } else {
-      setSyncStatus('ok', 'ISBN non trouvé');
+      // ISBN inconnu : afficher champs manuels, pas de countdown
+      document.getElementById('auto-title').textContent  = 'ISBN non trouvé';
+      document.getElementById('auto-author').textContent = 'Remplis les infos manuellement';
+      document.getElementById('auto-meta').textContent   = isbn;
+      document.getElementById('auto-cover').innerHTML = `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">❓</div>`;
+      document.getElementById('auto-manual-fields').style.display = 'flex';
+      document.getElementById('auto-countdown-label').innerHTML = 'Complète les infos puis clique <strong>Maintenant</strong>';
+      bar.style.width = '0%';
+      autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
+      setSyncStatus('ok', 'ISBN non trouvé — saisie manuelle');
       toast('⚠ ISBN inconnu — remplis manuellement');
     }
   } catch(e) {
     setSyncStatus('err', 'Erreur réseau');
     toast('❌ Erreur Open Library');
+    document.getElementById('auto-title').textContent = 'Erreur de recherche';
+    document.getElementById('auto-meta').textContent  = isbn;
+    autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
+    document.getElementById('auto-manual-fields').style.display = 'flex';
+    document.getElementById('auto-countdown-label').innerHTML = 'Complète les infos puis clique <strong>Maintenant</strong>';
+    bar.style.width = '0%';
   }
 }
 
-// ══════════════════════════════════════════════
-// SAVE / DELETE
-// ══════════════════════════════════════════════
-async function saveBook() {
-  const cfg = loadConfig();
-  const isbn = document.getElementById('f-isbn').value.trim();
-  const title = document.getElementById('f-title').value.trim();
-  const author = document.getElementById('f-author').value.trim();
-  const publisher = document.getElementById('f-publisher').value.trim();
-  const year = document.getElementById('f-year').value.trim();
-  const status = document.getElementById('f-status').value;
-  const notes = document.getElementById('f-notes').value.trim();
+function startCountdown() {
+  const bar    = document.getElementById('auto-countdown-bar');
+  const secEl  = document.getElementById('auto-sec');
+  const label  = document.getElementById('auto-countdown-label');
 
-  if (!isbn && !title) { toast('⚠ ISBN ou titre requis'); return; }
+  label.innerHTML = 'Enregistrement dans <strong id="auto-sec">3</strong>s…';
+
+  // Animer la barre
+  requestAnimationFrame(() => {
+    bar.style.transition = `width ${AUTO_DELAY}ms linear`;
+    bar.style.width = '0%';
+  });
+
+  let remaining = AUTO_DELAY / 1000;
+  const tick = setInterval(() => {
+    remaining -= 1;
+    const el = document.getElementById('auto-sec');
+    if (el) el.textContent = remaining;
+    if (remaining <= 0) clearInterval(tick);
+  }, 1000);
+
+  autoSaveTimer = setTimeout(() => {
+    clearInterval(tick);
+    confirmAutoSave();
+  }, AUTO_DELAY);
+}
+
+function setAutoStatus(s) {
+  autoStatus = s;
+  updateStatusChips();
+  // Réinitialiser le countdown si il tournait
+  if (autoSaveData && autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    startCountdown();
+  }
+}
+
+function updateStatusChips() {
+  const map = { 'à lire': 'sc-alire', 'en cours': 'sc-encours', 'lu': 'sc-lu' };
+  const activeClass = { 'à lire': 'active-alire', 'en cours': 'active-en-cours', 'lu': 'active-lu' };
+  ['à lire','en cours','lu'].forEach(s => {
+    const el = document.getElementById(map[s]);
+    if (!el) return;
+    el.className = 'status-chip' + (s === autoStatus ? ' ' + activeClass[s] : '');
+  });
+}
+
+function cancelAutoSave() {
+  if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+  autoSaveData = null;
+  document.getElementById('auto-preview').style.display = 'none';
+  document.getElementById('add-empty').style.display = 'flex';
+  document.getElementById('isbn-manual').value = '';
+  document.getElementById('f-isbn').value = '';
+  currentCoverUrl = '';
+  setSyncStatus('ok', 'Annulé');
+}
+
+async function confirmAutoSave() {
+  if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+  if (!autoSaveData) return;
+
+  // Si champs manuels visibles, les lire
+  const manualVisible = document.getElementById('auto-manual-fields').style.display !== 'none';
+  if (manualVisible) {
+    autoSaveData.title     = document.getElementById('f-title').value.trim();
+    autoSaveData.author    = document.getElementById('f-author').value.trim();
+    autoSaveData.publisher = document.getElementById('f-publisher').value.trim();
+    autoSaveData.year      = document.getElementById('f-year').value.trim();
+  }
+
+  const { isbn, title, author, publisher, year } = autoSaveData;
+  if (!isbn && !title) { toast('⚠ Titre requis'); return; }
 
   if (isbn && books.some(b => b.isbn === isbn)) {
     toast('⚠ Ce livre est déjà dans ta liste');
+    cancelAutoSave();
     return;
   }
 
+  const cfg = loadConfig();
   const payload = {
     isbn, title, author, publisher, year,
-    status, notes,
+    status: autoStatus,
+    notes: '',
     cover_url: currentCoverUrl,
     added_by: cfg.user || 'moi',
     created_at: new Date().toISOString()
@@ -1535,12 +1639,15 @@ async function saveBook() {
   renderBookList();
   renderStats();
   updateHeaderCount();
-  resetAddForm();
+  cancelAutoSave();
   showTab('list');
   setSyncStatus('ok', 'Livre ajouté ✓');
-  toast('✅ Livre ajouté !');
+  toast('✅ ' + (title || isbn) + ' ajouté !');
 }
 
+// ══════════════════════════════════════════════
+// SAVE / DELETE
+// ══════════════════════════════════════════════
 async function deleteBook(e, id, fromModal = false) {
   if (e) e.stopPropagation();
   if (!confirm('Supprimer ce livre ?')) return;
@@ -1556,15 +1663,7 @@ async function deleteBook(e, id, fromModal = false) {
 }
 
 function resetAddForm() {
-  ['f-isbn','f-title','f-author','f-publisher','f-year','f-notes'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
-  document.getElementById('f-status').value = 'à lire';
-  document.getElementById('add-form').classList.add('hidden');
-  document.getElementById('add-empty').style.display = 'flex';
-  document.getElementById('book-preview-container').innerHTML = '';
-  document.getElementById('isbn-manual').value = '';
-  currentCoverUrl = '';
+  cancelAutoSave();
   stopCamera();
 }
 
