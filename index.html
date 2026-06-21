@@ -1106,8 +1106,8 @@
       </div>
 
       <div style="font-size:12px;color:var(--text3);text-align:center;margin-top:2rem;line-height:2">
-        Biblio v1.2 — données hébergées sur Supabase<br>
-        Recherche ISBN : Open Library, Google Books, BNF, OCLC Classify
+        Biblio v1.3 — données hébergées sur Supabase<br>
+        Recherche ISBN : Open Library, Google Books (+ BD), BNF, OCLC
       </div>
     </div>
 
@@ -1586,7 +1586,8 @@ async function fetchOpenLibraryEdition(isbn) {
 }
 
 async function fetchGoogleBooks(isbn) {
-  const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
+  // country=FR améliore nettement la couverture FR (BD franco-belge incluse), sans clé requise.
+  const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&country=FR&maxResults=1`);
   if (!res.ok) throw new Error(`Google Books HTTP ${res.status}`);
   return parseGoogleBooks(await res.json());
 }
@@ -1595,6 +1596,34 @@ async function fetchOpenLibrarySearch(isbn) {
   const res = await fetch(`https://openlibrary.org/search.json?isbn=${isbn}&fields=title,author_name,publisher,first_publish_year,cover_i,isbn&limit=5`);
   if (!res.ok) throw new Error(`OL search HTTP ${res.status}`);
   return parseOpenLibrarySearch(await res.json(), isbn);
+}
+
+async function fetchGoogleBooksComics(isbn) {
+  // Recherche élargie : certaines BD/comics franco-belges ne sont pas indexées sur le
+  // champ ISBN structuré de Google, mais le numéro apparaît en texte libre dans la fiche.
+  // On filtre ensuite sur subject "Comics" / "Bandes dessinées" pour limiter le bruit.
+  const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${isbn}+subject:comics&country=FR&maxResults=3`);
+  if (!res.ok) throw new Error(`Google Books (BD) HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.totalItems || !data.items?.length) return null;
+  // Ne garde que les résultats dont l'ISBN matche réellement, pour éviter les faux positifs.
+  const match = data.items.find(it =>
+    (it.volumeInfo.industryIdentifiers || []).some(id => id.identifier === isbn)
+  );
+  if (!match) return null;
+  const result = parseGoogleBooks({ totalItems: 1, items: [match] });
+  if (result) result.source = 'Google Books (BD)';
+  return result;
+}
+
+async function fetchOpenLibraryComics(isbn) {
+  // Variante BD : on ajoute le filtre subject pour prioriser les éditions de bande dessinée
+  // quand l'ISBN seul renvoie plusieurs œuvres ambiguës (cas fréquent pour les comics réédités).
+  const res = await fetch(`https://openlibrary.org/search.json?isbn=${isbn}&subject=comics&fields=title,author_name,publisher,first_publish_year,cover_i,isbn&limit=5`);
+  if (!res.ok) throw new Error(`OL search (BD) HTTP ${res.status}`);
+  const result = parseOpenLibrarySearch(await res.json(), isbn);
+  if (result) result.source = 'Open Library (BD)';
+  return result;
 }
 
 async function fetchOclcClassify(isbn) {
@@ -1616,12 +1645,14 @@ async function fetchBnfSru(isbn) {
 
 async function fetchBookMetadata(isbn) {
   const sources = [
-    { name: 'Open Library',           fn: () => fetchOpenLibraryLegacy(isbn) },
-    { name: 'Google Books',           fn: () => fetchGoogleBooks(isbn) },
-    { name: 'Open Library (édition)', fn: () => fetchOpenLibraryEdition(isbn) },
+    { name: 'Open Library',             fn: () => fetchOpenLibraryLegacy(isbn) },
+    { name: 'Google Books',             fn: () => fetchGoogleBooks(isbn) },
+    { name: 'Open Library (édition)',   fn: () => fetchOpenLibraryEdition(isbn) },
     { name: 'Open Library (recherche)', fn: () => fetchOpenLibrarySearch(isbn) },
-    { name: 'BNF Catalogue général',  fn: () => fetchBnfSru(isbn) },
-    { name: 'OCLC Classify',          fn: () => fetchOclcClassify(isbn) },
+    { name: 'Google Books (BD)',        fn: () => fetchGoogleBooksComics(isbn) },
+    { name: 'Open Library (BD)',        fn: () => fetchOpenLibraryComics(isbn) },
+    { name: 'BNF Catalogue général',    fn: () => fetchBnfSru(isbn) },
+    { name: 'OCLC Classify',            fn: () => fetchOclcClassify(isbn) },
   ];
 
   for (const src of sources) {
@@ -1685,7 +1716,7 @@ async function lookupISBN(isbn) {
     bar.style.width = '0%';
     autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
     setSyncStatus('ok', 'Introuvable — saisie manuelle');
-    toast('⚠ ISBN introuvable sur les 6 bases consultées');
+    toast('⚠ ISBN introuvable sur les 8 bases consultées');
   }
 }
 
