@@ -1461,83 +1461,153 @@ function lookupManualISBN() {
 }
 
 // ══════════════════════════════════════════════
-// OPEN LIBRARY LOOKUP + AUTO-SAVE
+// ISBN LOOKUP — CHAÎNE DE SOURCES
 // ══════════════════════════════════════════════
 let autoSaveTimer = null;
 let autoSaveData = null;
 let autoStatus = 'à lire';
 const AUTO_DELAY = 3000; // ms
 
+// ── Helpers d'extraction par source ──────────
+
+function parseOpenLibraryBook(data, isbn) {
+  const key = `ISBN:${isbn}`;
+  const book = data[key];
+  if (!book) return null;
+  return {
+    title:     book.title || '',
+    author:    book.authors    ? book.authors.map(a => a.name).join(', ')    : '',
+    publisher: book.publishers ? book.publishers.map(p => p.name).join(', ') : '',
+    year:      book.publish_date ? (book.publish_date.match(/\d{4}/)?.[0] || '') : '',
+    cover:     book.cover?.large || book.cover?.medium || book.cover?.small || '',
+    source:    'Open Library'
+  };
+}
+
+function parseOpenLibraryEdition(data) {
+  if (!data || data.error) return null;
+  const title     = data.title || '';
+  const authors   = (data.authors || []).map(a => a.name || '').filter(Boolean).join(', ');
+  const publisher = (data.publishers || []).join(', ');
+  const year      = data.publish_date ? (data.publish_date.match(/\d{4}/)?.[0] || '') : '';
+  const coverId   = data.covers?.[0];
+  const cover     = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '';
+  if (!title && !authors) return null;
+  return { title, author: authors, publisher, year, cover, source: 'Open Library (édition)' };
+}
+
+function parseGoogleBooks(data) {
+  if (!data.totalItems || !data.items?.length) return null;
+  const info = data.items[0].volumeInfo;
+  const coverId = data.items[0].id;
+  const cover = info.imageLinks?.extraLarge
+    || info.imageLinks?.large
+    || info.imageLinks?.medium
+    || info.imageLinks?.thumbnail
+    || (coverId ? `https://books.google.com/books/content?id=${coverId}&printsec=frontcover&img=1&zoom=1` : '')
+    || '';
+  return {
+    title:     info.title || '',
+    author:    (info.authors || []).join(', '),
+    publisher: info.publisher || '',
+    year:      info.publishedDate ? (info.publishedDate.match(/\d{4}/)?.[0] || '') : '',
+    cover,
+    source:    'Google Books'
+  };
+}
+
+// ── Source fetchers ───────────────────────────
+
+async function fetchOpenLibraryLegacy(isbn) {
+  const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+  if (!res.ok) throw new Error(`OL legacy HTTP ${res.status}`);
+  return parseOpenLibraryBook(await res.json(), isbn);
+}
+
+async function fetchOpenLibraryEdition(isbn) {
+  const res = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`OL edition HTTP ${res.status}`);
+  return parseOpenLibraryEdition(await res.json());
+}
+
+async function fetchGoogleBooks(isbn) {
+  const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
+  if (!res.ok) throw new Error(`Google Books HTTP ${res.status}`);
+  return parseGoogleBooks(await res.json());
+}
+
+// ── Chaîne principale ─────────────────────────
+
+async function fetchBookMetadata(isbn) {
+  const sources = [
+    { name: 'Open Library',          fn: () => fetchOpenLibraryLegacy(isbn) },
+    { name: 'Google Books',           fn: () => fetchGoogleBooks(isbn) },
+    { name: 'Open Library (édition)', fn: () => fetchOpenLibraryEdition(isbn) },
+  ];
+
+  for (const src of sources) {
+    setSyncStatus('busy', `Recherche — ${src.name}…`);
+    try {
+      const result = await src.fn();
+      if (result && (result.title || result.author)) return result;
+    } catch(e) {
+      console.warn(`${src.name} échoué :`, e.message);
+    }
+  }
+  return null; // toutes les sources épuisées
+}
+
+// ── Lookup principal ──────────────────────────
+
 async function lookupISBN(isbn) {
   cancelAutoSave();
-  setSyncStatus('busy', 'Recherche ISBN…');
 
-  // Afficher l'aperçu immédiatement
+  // Afficher l'aperçu "recherche en cours"
   document.getElementById('add-empty').style.display = 'none';
   document.getElementById('auto-preview').style.display = 'flex';
   document.getElementById('auto-manual-fields').style.display = 'none';
-  document.getElementById('auto-title').textContent = 'Recherche en cours…';
+  document.getElementById('auto-title').textContent  = 'Recherche en cours…';
   document.getElementById('auto-author').textContent = '';
-  document.getElementById('auto-meta').textContent = isbn;
-  document.getElementById('auto-cover').innerHTML = '<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid var(--border)">⏳</div>';
+  document.getElementById('auto-meta').textContent   = isbn;
+  document.getElementById('auto-cover').innerHTML    = '<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid var(--border)">⏳</div>';
   currentCoverUrl = '';
   autoStatus = 'à lire';
   updateStatusChips();
 
-  // Reset countdown bar
   const bar = document.getElementById('auto-countdown-bar');
   bar.style.transition = 'none';
   bar.style.width = '100%';
 
-  try {
-    const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-    const data = await res.json();
-    const key = `ISBN:${isbn}`;
-    const book = data[key];
+  const book = await fetchBookMetadata(isbn);
 
-    if (book) {
-      const title     = book.title || '';
-      const author    = book.authors    ? book.authors.map(a => a.name).join(', ')    : '';
-      const publisher = book.publishers ? book.publishers.map(p => p.name).join(', ') : '';
-      const year      = book.publish_date ? (book.publish_date.match(/\d{4}/)?.[0] || '') : '';
-      const cover     = book.cover?.large || book.cover?.medium || book.cover?.small || '';
-      currentCoverUrl = cover;
+  if (book) {
+    currentCoverUrl = book.cover;
 
-      // Remplir l'aperçu
-      document.getElementById('auto-title').textContent  = title || isbn;
-      document.getElementById('auto-author').textContent = author || '—';
-      document.getElementById('auto-meta').textContent   = [publisher, year].filter(Boolean).join(' · ') || isbn;
-      document.getElementById('auto-cover').innerHTML = cover
-        ? `<img src="${cover}" style="width:46px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border)">`
-        : `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">📘</div>`;
+    document.getElementById('auto-title').textContent  = book.title  || isbn;
+    document.getElementById('auto-author').textContent = book.author || '—';
+    document.getElementById('auto-meta').textContent   =
+      [book.publisher, book.year].filter(Boolean).join(' · ') || isbn;
+    document.getElementById('auto-cover').innerHTML = book.cover
+      ? `<img src="${book.cover}" style="width:46px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" onerror="this.outerHTML='<div style=\'width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)\'>📘</div>'">`
+      : `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">📘</div>`;
 
-      // Stocker le payload
-      autoSaveData = { isbn, title, author, publisher, year };
-      setSyncStatus('ok', 'Livre trouvé ✓');
-      startCountdown();
+    autoSaveData = { isbn, title: book.title, author: book.author, publisher: book.publisher, year: book.year };
+    setSyncStatus('ok', `Trouvé via ${book.source} ✓`);
+    startCountdown();
 
-    } else {
-      // ISBN inconnu : afficher champs manuels, pas de countdown
-      document.getElementById('auto-title').textContent  = 'ISBN non trouvé';
-      document.getElementById('auto-author').textContent = 'Remplis les infos manuellement';
-      document.getElementById('auto-meta').textContent   = isbn;
-      document.getElementById('auto-cover').innerHTML = `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">❓</div>`;
-      document.getElementById('auto-manual-fields').style.display = 'flex';
-      document.getElementById('auto-countdown-label').innerHTML = 'Complète les infos puis clique <strong>Maintenant</strong>';
-      bar.style.width = '0%';
-      autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
-      setSyncStatus('ok', 'ISBN non trouvé — saisie manuelle');
-      toast('⚠ ISBN inconnu — remplis manuellement');
-    }
-  } catch(e) {
-    setSyncStatus('err', 'Erreur réseau');
-    toast('❌ Erreur Open Library');
-    document.getElementById('auto-title').textContent = 'Erreur de recherche';
-    document.getElementById('auto-meta').textContent  = isbn;
-    autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
+  } else {
+    // Aucune source n'a trouvé
+    document.getElementById('auto-title').textContent  = 'Introuvable sur toutes les bases';
+    document.getElementById('auto-author').textContent = 'Remplis manuellement';
+    document.getElementById('auto-meta').textContent   = isbn;
+    document.getElementById('auto-cover').innerHTML    = `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">❓</div>`;
     document.getElementById('auto-manual-fields').style.display = 'flex';
-    document.getElementById('auto-countdown-label').innerHTML = 'Complète les infos puis clique <strong>Maintenant</strong>';
+    document.getElementById('auto-countdown-label').innerHTML   = 'Complète les infos puis clique <strong>Maintenant</strong>';
     bar.style.width = '0%';
+    autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
+    setSyncStatus('ok', 'Introuvable — saisie manuelle');
+    toast('⚠ ISBN non trouvé sur Open Library, Google Books et OL édition');
   }
 }
 
