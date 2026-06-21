@@ -1106,8 +1106,8 @@
       </div>
 
       <div style="font-size:12px;color:var(--text3);text-align:center;margin-top:2rem;line-height:2">
-        Biblio v1.1 — données hébergées sur Supabase<br>
-        Open Library API pour les métadonnées ISBN
+        Biblio v1.2 — données hébergées sur Supabase<br>
+        Recherche ISBN : Open Library, Google Books, BNF, OCLC Classify
       </div>
     </div>
 
@@ -1516,6 +1516,60 @@ function parseGoogleBooks(data) {
   };
 }
 
+function parseOpenLibrarySearch(data, isbn) {
+  if (!data.docs?.length) return null;
+  // Préfère un doc dont l'ISBN matche exactement, sinon prend le 1er résultat
+  const doc = data.docs.find(d => (d.isbn || []).includes(isbn)) || data.docs[0];
+  if (!doc) return null;
+  const cover = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : '';
+  return {
+    title:     doc.title || '',
+    author:    (doc.author_name || []).join(', '),
+    publisher: (doc.publisher || [])[0] || '',
+    year:      doc.first_publish_year ? String(doc.first_publish_year) : '',
+    cover,
+    source:    'Open Library (recherche)'
+  };
+}
+
+function parseOclcClassify(xmlText) {
+  const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
+  if (xml.querySelector('parsererror')) return null;
+  const work = xml.querySelector('work');
+  if (!work) return null;
+  const title  = work.getAttribute('title') || '';
+  const author = work.getAttribute('author') || '';
+  if (!title && !author) return null;
+  return {
+    title, author,
+    publisher: '',
+    year: '',
+    cover: '',
+    source: 'OCLC Classify'
+  };
+}
+
+function parseBnfSru(xmlText) {
+  const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
+  if (xml.querySelector('parsererror')) return null;
+  // Notices renvoyées en Dublin Core (recordSchema=dublincore)
+  const titleEl = xml.querySelector('dc\\:title, title');
+  const authorEl = xml.querySelector('dc\\:creator, creator');
+  const publisherEl = xml.querySelector('dc\\:publisher, publisher');
+  const dateEl = xml.querySelector('dc\\:date, date');
+  const title = titleEl?.textContent?.trim() || '';
+  const author = authorEl?.textContent?.trim() || '';
+  if (!title && !author) return null;
+  return {
+    title,
+    author,
+    publisher: publisherEl?.textContent?.trim() || '',
+    year: (dateEl?.textContent || '').match(/\d{4}/)?.[0] || '',
+    cover: '',
+    source: 'BNF Catalogue général'
+  };
+}
+
 // ── Source fetchers ───────────────────────────
 
 async function fetchOpenLibraryLegacy(isbn) {
@@ -1537,13 +1591,37 @@ async function fetchGoogleBooks(isbn) {
   return parseGoogleBooks(await res.json());
 }
 
+async function fetchOpenLibrarySearch(isbn) {
+  const res = await fetch(`https://openlibrary.org/search.json?isbn=${isbn}&fields=title,author_name,publisher,first_publish_year,cover_i,isbn&limit=5`);
+  if (!res.ok) throw new Error(`OL search HTTP ${res.status}`);
+  return parseOpenLibrarySearch(await res.json(), isbn);
+}
+
+async function fetchOclcClassify(isbn) {
+  // API en accès libre, sans clé. Pas de CORS garanti par OCLC -> on échoue silencieusement si bloqué.
+  const res = await fetch(`https://classify.oclc.org/classify2/Classify?isbn=${isbn}&summary=true`);
+  if (!res.ok) throw new Error(`OCLC Classify HTTP ${res.status}`);
+  return parseOclcClassify(await res.text());
+}
+
+async function fetchBnfSru(isbn) {
+  // Catalogue général BnF, service SRU public sans clé. Notices en Dublin Core pour parsing simple.
+  const url = `https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve&query=bib.isbn%20adj%20%22${isbn}%22&recordSchema=dublincore&maximumRecords=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`BNF SRU HTTP ${res.status}`);
+  return parseBnfSru(await res.text());
+}
+
 // ── Chaîne principale ─────────────────────────
 
 async function fetchBookMetadata(isbn) {
   const sources = [
-    { name: 'Open Library',          fn: () => fetchOpenLibraryLegacy(isbn) },
+    { name: 'Open Library',           fn: () => fetchOpenLibraryLegacy(isbn) },
     { name: 'Google Books',           fn: () => fetchGoogleBooks(isbn) },
     { name: 'Open Library (édition)', fn: () => fetchOpenLibraryEdition(isbn) },
+    { name: 'Open Library (recherche)', fn: () => fetchOpenLibrarySearch(isbn) },
+    { name: 'BNF Catalogue général',  fn: () => fetchBnfSru(isbn) },
+    { name: 'OCLC Classify',          fn: () => fetchOclcClassify(isbn) },
   ];
 
   for (const src of sources) {
@@ -1607,7 +1685,7 @@ async function lookupISBN(isbn) {
     bar.style.width = '0%';
     autoSaveData = { isbn, title: '', author: '', publisher: '', year: '' };
     setSyncStatus('ok', 'Introuvable — saisie manuelle');
-    toast('⚠ ISBN non trouvé sur Open Library, Google Books et OL édition');
+    toast('⚠ ISBN introuvable sur les 6 bases consultées');
   }
 }
 
