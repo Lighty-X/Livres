@@ -356,6 +356,11 @@
     .badge-lu { background: var(--green-bg); color: var(--green); }
     .badge-alire { background: var(--accent-bg); color: var(--accent-light); }
     .badge-en-cours { background: var(--amber-bg); color: var(--amber); }
+    .badge-category {
+      background: var(--surface);
+      color: var(--text2);
+      border: 1px solid var(--border2);
+    }
 
     .book-delete {
       position: absolute;
@@ -937,16 +942,19 @@
 
     <!-- LIST TAB -->
     <div id="list-tab">
-      <div class="search-bar">
-        <div class="search-input-wrap">
+      <div class="search-bar" style="flex-wrap:wrap">
+        <div class="search-input-wrap" style="flex-basis:100%">
           <span class="search-icon">🔍</span>
           <input type="text" id="search-input" placeholder="Titre, auteur, ISBN…" oninput="filterBooks()">
         </div>
-        <select id="filter-status" class="form-input" style="width:120px;padding:8px 32px 8px 10px;font-size:13px;" onchange="filterBooks()">
-          <option value="">Tout</option>
+        <select id="filter-status" class="form-input" style="flex:1;padding:8px 32px 8px 10px;font-size:13px;" onchange="filterBooks()">
+          <option value="">Tout statut</option>
           <option value="à lire">À lire</option>
           <option value="en cours">📖 En cours</option>
           <option value="lu">✅ Lu</option>
+        </select>
+        <select id="filter-category" class="form-input" style="flex:1;padding:8px 32px 8px 10px;font-size:13px;" onchange="filterBooks()">
+          <option value="">Toute catégorie</option>
         </select>
       </div>
       <div id="book-list"></div>
@@ -1005,6 +1013,24 @@
           </div>
         </div>
 
+        <!-- Catégorie -->
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Catégorie</div>
+          <select class="form-input" id="auto-category" style="padding:8px 32px 8px 10px;font-size:13px" onchange="onCategorySelectChange()">
+            <option value="Roman">Roman</option>
+            <option value="BD">BD</option>
+            <option value="Polar">Polar</option>
+            <option value="SF/Fantasy">SF/Fantasy</option>
+            <option value="Histoire">Histoire</option>
+            <option value="Géographie">Géographie</option>
+            <option value="Astérix">Astérix</option>
+            <option value="Tuniques Bleues">Tuniques Bleues</option>
+            <option value="Spirou">Spirou</option>
+            <option value="__autre__">Autre…</option>
+          </select>
+          <input class="form-input" type="text" id="auto-category-custom" placeholder="Nom de la catégorie" style="display:none">
+        </div>
+
         <!-- Countdown + boutons -->
         <div style="display:flex;gap:8px;align-items:center">
           <div id="auto-countdown-label" style="flex:1;font-size:13px;color:var(--text3)">Enregistrement dans <strong id="auto-sec">3</strong>s...</div>
@@ -1056,6 +1082,9 @@
 
       <div class="stat-section-title">Répartition par statut</div>
       <div id="stat-bars"></div>
+
+      <div class="stat-section-title">Répartition par catégorie</div>
+      <div id="stat-category-bars"></div>
 
       <div class="stat-section-title">Derniers ajouts</div>
       <div id="stat-recents"></div>
@@ -1265,22 +1294,28 @@ function filterBooks() {
 function renderBookList() {
   const query = document.getElementById('search-input').value.toLowerCase();
   const status = document.getElementById('filter-status').value;
+  const category = document.getElementById('filter-category').value;
   const container = document.getElementById('book-list');
+
+  updateCategoryFilterOptions();
 
   let filtered = books.filter(b => {
     const matchQ = !query ||
       (b.title || '').toLowerCase().includes(query) ||
       (b.author || '').toLowerCase().includes(query) ||
+      (b.category || '').toLowerCase().includes(query) ||
       (b.isbn || '').includes(query);
     const matchS = !status || b.status === status;
-    return matchQ && matchS;
+    const matchC = !category || b.category === category;
+    return matchQ && matchS && matchC;
   });
 
   if (filtered.length === 0) {
+    const hasFilter = query || status || category;
     container.innerHTML = `<div class="empty-state">
       <div class="empty-icon">📭</div>
-      <div class="empty-title">${query || status ? 'Aucun résultat' : 'Aucun livre'}</div>
-      <div class="empty-sub">${query || status ? 'Modifie ta recherche' : 'Scanne un ISBN pour commencer !'}</div>
+      <div class="empty-title">${hasFilter ? 'Aucun résultat' : 'Aucun livre'}</div>
+      <div class="empty-sub">${hasFilter ? 'Modifie ta recherche' : 'Scanne un ISBN pour commencer !'}</div>
     </div>`;
     return;
   }
@@ -1298,6 +1333,7 @@ function renderBookList() {
         <div class="book-author">${esc(b.author || 'Auteur inconnu')}</div>
         <div class="book-meta">
           <span class="badge ${statusClass}">${statusLabel}</span>
+          ${b.category ? `<span class="badge badge-category">${esc(b.category)}</span>` : ''}
           ${b.year ? `<span class="book-isbn">${b.year}</span>` : ''}
           ${b.isbn ? `<span class="book-isbn">${b.isbn}</span>` : ''}
         </div>
@@ -1305,6 +1341,15 @@ function renderBookList() {
       <button class="book-delete" onclick="deleteBook(event,'${b.id}')">×</button>
     </div>`;
   }).join('');
+}
+
+function updateCategoryFilterOptions() {
+  const select = document.getElementById('filter-category');
+  const current = select.value;
+  const categories = Array.from(new Set(books.map(b => b.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fr'));
+  select.innerHTML = '<option value="">Toute catégorie</option>' +
+    categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  if (categories.includes(current)) select.value = current;
 }
 
 // ══════════════════════════════════════════════
@@ -1327,6 +1372,15 @@ function openBook(id) {
     return `<button class="${cls}" onclick="updateStatus('${id}','${s}')">${label}</button>`;
   }).join('');
 
+  const categoryOptions = ['Roman','BD','Polar','SF/Fantasy','Histoire','Géographie','Astérix','Tuniques Bleues','Spirou'];
+  const currentCat = b.category || '';
+  const catSelectHTML = `
+    <select class="form-input" style="padding:6px 30px 6px 10px;font-size:13px;width:auto" onchange="onModalCategoryChange('${id}', this.value)">
+      <option value="" ${!currentCat ? 'selected' : ''}>—</option>
+      ${categoryOptions.map(c => `<option value="${esc(c)}" ${c === currentCat ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+      <option value="__autre__" ${currentCat && !categoryOptions.includes(currentCat) ? 'selected' : ''}>${currentCat && !categoryOptions.includes(currentCat) ? esc(currentCat) + ' (autre)' : 'Autre…'}</option>
+    </select>`;
+
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-cover-section">
       ${coverHTML}
@@ -1344,6 +1398,10 @@ function openBook(id) {
         <span class="detail-key">Ajouté par</span>
         <span class="detail-val">${esc(b.added_by || '—')}</span>
       </div>
+      <div class="detail-row">
+        <span class="detail-key">Catégorie</span>
+        ${catSelectHTML}
+      </div>
       <div class="detail-row" style="border:none">
         <span class="detail-key">Statut</span>
         <div class="status-picker">${statusChips}</div>
@@ -1357,6 +1415,27 @@ function openBook(id) {
   `;
 
   document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function onModalCategoryChange(id, value) {
+  if (value === '__autre__') {
+    const custom = prompt('Nom de la catégorie :', currentBook?.category || '');
+    if (custom === null) { openBook(id); return; } // annulé -> on réaffiche l'état précédent
+    updateCategory(id, custom.trim());
+    return;
+  }
+  updateCategory(id, value);
+}
+
+async function updateCategory(id, category) {
+  const { error } = await supabaseClient.from('books').update({ category }).eq('id', id);
+  if (error) { toast('❌ ' + error.message); return; }
+  const b = books.find(x => x.id === id);
+  if (b) b.category = category;
+  openBook(id);
+  renderBookList();
+  renderStats();
+  toast('Catégorie mise à jour');
 }
 
 async function updateStatus(id, status) {
@@ -1723,6 +1802,60 @@ async function fetchBookMetadata(isbn) {
 
 // ── Lookup principal ──────────────────────────
 
+// ── Détection automatique de catégorie ────────
+
+function detectCategory(book) {
+  const haystack = `${book.title || ''} ${book.publisher || ''}`.toLowerCase();
+
+  // Séries BD spécifiques détectées en priorité sur le titre/série.
+  if (/ast[ée]rix/.test(haystack)) return 'Astérix';
+  if (/tuniques?\s+bleues?/.test(haystack)) return 'Tuniques Bleues';
+  if (/\bspirou\b/.test(haystack)) return 'Spirou';
+
+  // Sinon, si la source qui a trouvé le livre est une source spécialisée BD,
+  // ou si la notice BNF a un format catalographique typique de BD (mentions dessins/scénario),
+  // on retombe sur la catégorie générique "BD".
+  if (book.source && /\(BD\)|BNF/.test(book.source)) return 'BD';
+
+  return ''; // pas de catégorie détectée -> l'utilisateur choisit
+}
+
+function setAutoCategory(cat) {
+  const select = document.getElementById('auto-category');
+  const custom = document.getElementById('auto-category-custom');
+  const knownValues = Array.from(select.options).map(o => o.value);
+  if (!cat) {
+    select.value = 'Roman';
+    custom.style.display = 'none';
+    custom.value = '';
+  } else if (knownValues.includes(cat)) {
+    select.value = cat;
+    custom.style.display = 'none';
+    custom.value = '';
+  } else {
+    select.value = '__autre__';
+    custom.style.display = 'block';
+    custom.value = cat;
+  }
+}
+
+function onCategorySelectChange() {
+  const select = document.getElementById('auto-category');
+  const custom = document.getElementById('auto-category-custom');
+  custom.style.display = select.value === '__autre__' ? 'block' : 'none';
+  if (select.value === '__autre__') custom.focus();
+}
+
+function getCurrentCategory() {
+  const select = document.getElementById('auto-category');
+  if (select.value === '__autre__') {
+    return document.getElementById('auto-category-custom').value.trim();
+  }
+  return select.value;
+}
+
+// ── Lookup principal ──────────────────────────
+
 async function lookupISBN(isbn) {
   cancelAutoSave();
 
@@ -1737,6 +1870,7 @@ async function lookupISBN(isbn) {
   currentCoverUrl = '';
   autoStatus = 'lu';
   updateStatusChips();
+  setAutoCategory('');
 
   const bar = document.getElementById('auto-countdown-bar');
   bar.style.transition = 'none';
@@ -1754,6 +1888,8 @@ async function lookupISBN(isbn) {
     document.getElementById('auto-cover').innerHTML = book.cover
       ? `<img src="${book.cover}" style="width:46px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" onerror="this.outerHTML='<div style=\'width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)\'>📘</div>'">`
       : `<div style="width:46px;height:64px;background:var(--surface);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid var(--border)">📘</div>`;
+
+    setAutoCategory(detectCategory(book));
 
     autoSaveData = { isbn, title: book.title, author: book.author, publisher: book.publisher, year: book.year };
     setSyncStatus('ok', `Trouvé via ${book.source} ✓`);
@@ -1828,6 +1964,8 @@ function cancelAutoSave() {
   document.getElementById('add-empty').style.display = 'flex';
   document.getElementById('isbn-manual').value = '';
   document.getElementById('f-isbn').value = '';
+  document.getElementById('auto-category-custom').value = '';
+  document.getElementById('auto-category-custom').style.display = 'none';
   currentCoverUrl = '';
   setSyncStatus('ok', 'Annulé');
 }
@@ -1855,9 +1993,11 @@ async function confirmAutoSave() {
   }
 
   const cfg = loadConfig();
+  const category = getCurrentCategory();
   const payload = {
     isbn, title, author, publisher, year,
     status: autoStatus,
+    category,
     notes: '',
     cover_url: currentCoverUrl,
     added_by: cfg.user || 'moi',
@@ -1926,6 +2066,23 @@ function renderStats() {
       <span class="bar-label">${b.label}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${total ? Math.round(b.count/total*100) : 0}%;background:${b.color}"></div></div>
       <span class="bar-count">${b.count}</span>
+    </div>
+  `).join('');
+
+  // Répartition par catégorie (seules les catégories renseignées sont comptées)
+  const catCounts = {};
+  books.forEach(b => {
+    const c = b.category || 'Sans catégorie';
+    catCounts[c] = (catCounts[c] || 0) + 1;
+  });
+  const catEntries = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+  document.getElementById('stat-category-bars').innerHTML = total === 0
+    ? '<div style="color:var(--text3);font-size:13px">Aucun livre pour l\'instant</div>'
+    : catEntries.map(([label, count]) => `
+    <div class="bar-row">
+      <span class="bar-label" style="width:96px">${esc(label)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${total ? Math.round(count/total*100) : 0}%;background:var(--accent-light)"></div></div>
+      <span class="bar-count">${count}</span>
     </div>
   `).join('');
 
