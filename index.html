@@ -12,8 +12,6 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
 
-  <!-- ZXing for barcode scanning -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.20.0/zxing.min.js"></script>
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
@@ -1374,12 +1372,27 @@ function closeModal(e) {
 // CAMERA & SCAN
 // ══════════════════════════════════════════════
 async function startCamera() {
+  // BarcodeDetector = API native Chrome/Android (moteur Google)
+  if (!('BarcodeDetector' in window)) {
+    toast('⚠ Scan non supporté sur ce navigateur — utilise Chrome/Android');
+    return;
+  }
+
   try {
-    if (!window.ZXing) { toast('⚠ Bibliothèque de scan non chargée'); return; }
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-    const backCam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-    const deviceId = backCam ? backCam.deviceId : undefined;
+    const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] });
+
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+    cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    const video = document.getElementById('camera-video');
+    video.srcObject = cameraStream;
+    await video.play();
 
     document.getElementById('camera-container').style.display = 'block';
     document.getElementById('camera-controls').style.display = 'flex';
@@ -1388,20 +1401,32 @@ async function startCamera() {
     scanning = true;
     lastISBNScanned = '';
 
-    await codeReader.decodeFromVideoDevice(deviceId, 'camera-video', (result, err) => {
-      if (result && scanning) {
-        const isbn = result.getText();
-        if (isbn !== lastISBNScanned && isbn.length >= 10) {
-          lastISBNScanned = isbn;
-          scanning = false;
-          stopCamera();
-          document.getElementById('f-isbn').value = isbn;
-          lookupISBN(isbn);
+    // Boucle de détection sur chaque frame
+    async function scanLoop() {
+      if (!scanning) return;
+      try {
+        const barcodes = await detector.detect(video);
+        for (const barcode of barcodes) {
+          const raw = barcode.rawValue;
+          if (raw && raw !== lastISBNScanned && raw.length >= 8) {
+            lastISBNScanned = raw;
+            scanning = false;
+            stopCamera();
+            document.getElementById('f-isbn').value = raw;
+            lookupISBN(raw);
+            return;
+          }
         }
-      }
-    });
+      } catch(e) { /* frame skip normal */ }
+      if (scanning) requestAnimationFrame(scanLoop);
+    }
+
+    // Attendre que la vidéo soit prête avant de scanner
+    video.addEventListener('loadeddata', () => requestAnimationFrame(scanLoop), { once: true });
+    if (video.readyState >= 2) requestAnimationFrame(scanLoop);
+
   } catch(e) {
-    toast('❌ Caméra : ' + e.message);
+    toast('❌ Caméra : ' + (e.message || e));
     document.getElementById('camera-container').style.display = 'none';
     document.getElementById('camera-controls').style.display = 'none';
     document.getElementById('add-empty').style.display = 'flex';
@@ -1410,7 +1435,12 @@ async function startCamera() {
 
 function stopCamera() {
   scanning = false;
-  if (codeReader) { try { codeReader.reset(); } catch(e) {} codeReader = null; }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const video = document.getElementById('camera-video');
+  video.srcObject = null;
   document.getElementById('camera-container').style.display = 'none';
   document.getElementById('camera-controls').style.display = 'none';
 }
