@@ -851,6 +851,26 @@
     #isbn-manual-row input {
       flex: 1;
     }
+
+    /* ── KEY BADGE ── */
+    .key-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(124,106,247,0.08);
+      border: 1px solid rgba(124,106,247,0.2);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--accent-light);
+      margin-top: 4px;
+    }
+    .key-badge-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+    }
   </style>
 </head>
 <body>
@@ -863,12 +883,12 @@
 
   <div class="config-card">
     <div class="field-group">
-      <div class="field-label">URL Supabase</div>
-      <input type="text" id="cfg-url" placeholder="https://xxx.supabase.co" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div class="field-label">URL du projet</div>
+      <input type="text" id="cfg-url" placeholder="https://xxxx.supabase.co" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     <div class="field-group">
-      <div class="field-label">Anon key</div>
-      <input type="password" id="cfg-key" placeholder="eyJhbGci..." autocomplete="off">
+      <div class="field-label">Publishable key</div>
+      <input type="text" id="cfg-key" placeholder="sb_publishable_…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     <div class="field-group">
       <div class="field-label">Nom d'utilisateur</div>
@@ -878,8 +898,9 @@
       Connecter →
     </button>
     <div class="config-hint">
-      <a href="https://supabase.com" target="_blank">supabase.com</a> → New project → Settings → API.<br>
-      Copie l'URL et la clé <em>anon public</em>. C'est gratuit.
+      <a href="https://supabase.com/dashboard" target="_blank">supabase.com</a> → ton projet → <strong>Settings → API</strong><br>
+      Copie l'<em>URL du projet</em> et la <em>Publishable key</em> (<code>sb_publishable_…</code>).<br>
+      Active RLS sur la table <code>books</code> pour sécuriser l'accès.
     </div>
   </div>
 </div>
@@ -1046,8 +1067,14 @@
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Base Supabase</div>
+            <div class="settings-row-label">Projet Supabase</div>
             <div class="settings-row-sub" id="s-url">—</div>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Publishable key</div>
+            <div id="s-key-display" class="settings-row-sub">—</div>
           </div>
         </div>
       </div>
@@ -1073,7 +1100,7 @@
       </div>
 
       <div style="font-size:12px;color:var(--text3);text-align:center;margin-top:2rem;line-height:2">
-        Biblio v1.0 — données hébergées sur Supabase<br>
+        Biblio v1.1 — données hébergées sur Supabase<br>
         Open Library API pour les métadonnées ISBN
       </div>
     </div>
@@ -1121,7 +1148,11 @@ function saveConfig() {
   const url = document.getElementById('cfg-url').value.trim();
   const key = document.getElementById('cfg-key').value.trim();
   const user = document.getElementById('cfg-user').value.trim() || 'moi';
-  if (!url || !key) { toast('⚠ URL et clé requis'); return; }
+  if (!url || !key) { toast('⚠ URL et clé requises'); return; }
+  if (!key.startsWith('sb_publishable_') && !key.startsWith('eyJ')) {
+    toast('⚠ Clé invalide — commence par sb_publishable_…');
+    return;
+  }
   localStorage.setItem('supa_url', url);
   localStorage.setItem('supa_key', key);
   localStorage.setItem('supa_user', user);
@@ -1132,6 +1163,14 @@ function disconnect() {
   if (!confirm('Changer de configuration ?')) return;
   localStorage.clear();
   location.reload();
+}
+
+function maskKey(key) {
+  if (!key) return '—';
+  if (key.startsWith('sb_publishable_')) {
+    return key.slice(0, 18) + '…' + key.slice(-6);
+  }
+  return key.slice(0, 12) + '…' + key.slice(-4);
 }
 
 async function initApp() {
@@ -1152,6 +1191,11 @@ async function initApp() {
     document.getElementById('app').classList.remove('hidden');
     document.getElementById('s-user').textContent = cfg.user;
     document.getElementById('s-url').textContent = cfg.url.replace('https://', '').split('.')[0] + '.supabase.co';
+
+    // Show masked publishable key with badge
+    const keyEl = document.getElementById('s-key-display');
+    keyEl.innerHTML = `<span class="key-badge"><span class="key-badge-dot"></span>${maskKey(cfg.key)}</span>`;
+
     await syncBooks();
   } catch (e) {
     toast('❌ Erreur de connexion : ' + e.message);
@@ -1161,7 +1205,6 @@ async function initApp() {
 }
 
 async function ensureTable() {
-  // Try to select — if table doesn't exist, supabase will error
   const { error } = await supabaseClient.from('books').select('id').limit(1);
   if (error && error.code === '42P01') {
     toast('⚠ Table "books" introuvable — vois le README');
@@ -1335,7 +1378,6 @@ async function startCamera() {
     if (!window.ZXing) { toast('⚠ Bibliothèque de scan non chargée'); return; }
     codeReader = new ZXing.BrowserMultiFormatReader();
     const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-    // Prefer back camera
     const backCam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
     const deviceId = backCam ? backCam.deviceId : undefined;
 
@@ -1442,7 +1484,6 @@ async function saveBook() {
 
   if (!isbn && !title) { toast('⚠ ISBN ou titre requis'); return; }
 
-  // Check duplicate ISBN
   if (isbn && books.some(b => b.isbn === isbn)) {
     toast('⚠ Ce livre est déjà dans ta liste');
     return;
@@ -1512,11 +1553,13 @@ function renderStats() {
   document.getElementById('stat-alire').textContent = a_lire;
 
   const bars = [
-    { label: 'À lire', count: a_lire, color: 'var(--accent)', class: 'bar-fill' },
-    { label: 'En cours', count: en_cours, color: 'var(--amber)', class: 'bar-fill' },
-    { label: 'Lu', count: lu, color: 'var(--green)', class: 'bar-fill' },
+    { label: 'À lire', count: a_lire, color: 'var(--accent)' },
+    { label: 'En cours', count: en_cours, color: 'var(--amber)' },
+    { label: 'Lu', count: lu, color: 'var(--green)' },
   ];
-  document.getElementById('stat-bars').innerHTML = total === 0 ? '<div style="color:var(--text3);font-size:13px">Aucun livre pour l\'instant</div>' : bars.map(b => `
+  document.getElementById('stat-bars').innerHTML = total === 0
+    ? '<div style="color:var(--text3);font-size:13px">Aucun livre pour l\'instant</div>'
+    : bars.map(b => `
     <div class="bar-row">
       <span class="bar-label">${b.label}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${total ? Math.round(b.count/total*100) : 0}%;background:${b.color}"></div></div>
