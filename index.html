@@ -1466,7 +1466,7 @@ function lookupManualISBN() {
 let autoSaveTimer = null;
 let autoSaveData = null;
 let autoStatus = 'lu';
-const AUTO_DELAY = 4000; // ms
+const AUTO_DELAY = 3000; // ms
 
 // ── Helpers d'extraction par source ──────────
 
@@ -1549,16 +1549,69 @@ function parseOclcClassify(xmlText) {
   };
 }
 
+function cleanBnfTitle(raw) {
+  if (!raw) return '';
+  // La BNF renvoie souvent : "Titre / dessins, X ; scénario, Y ; couleurs, Z"
+  // On ne garde que la partie avant le " / " (mentions de responsabilité).
+  let title = raw.split(/\s+\/\s+/)[0].trim();
+  title = title.replace(/\s*[:.]\s*$/, '').trim();
+  return title;
+}
+
+function cleanBnfSeries(raw) {
+  if (!raw) return '';
+  // dc:relation peut contenir "Fait partie de : Les Tuniques bleues" ou juste le nom de la série.
+  let series = raw.replace(/^(Fait partie de|Est une partie de)\s*:?\s*/i, '').trim();
+  // Coupe d'éventuelles mentions de responsabilité ou numéro de notice ark qui traîneraient.
+  series = series.split(/\s+\/\s+/)[0].trim();
+  series = series.replace(/^ark:.*/i, '').trim();
+  return series;
+}
+
+function cleanBnfAuthor(raw) {
+  if (!raw) return '';
+  // Format fréquent : "Cauvin, Raoul (1938-2021). Auteur du texte"
+  // 1) coupe tout ce qui suit un point final (rôle : "Auteur du texte", "Illustrateur", etc.)
+  let author = raw.split(/\.\s*(Auteur|Illustrateur|Scénariste|Dessinateur|Coloriste|Adaptateur)/i)[0];
+  // 2) retire la parenthèse de dates "(1938-2021)"
+  author = author.replace(/\s*\(\d{4}(-\d{4})?\)\s*/g, ' ').trim();
+  // 3) remet "Nom, Prénom" en "Prénom Nom" si le format BNF "Nom, Prénom" est détecté
+  const m = author.match(/^([^,]+),\s*(.+)$/);
+  if (m) author = `${m[2]} ${m[1]}`.trim();
+  return author.replace(/\s{2,}/g, ' ').trim();
+}
+
+function buildFullTitle(rawTitle, seriesRaw) {
+  // Cas 1 : le titre BNF intègre déjà la série, ex. "Les Tuniques bleues. 64, Sallie"
+  //         ou "Les Tuniques bleues, 64. Sallie" -> on le détecte et on normalise en "Série - Sous-titre".
+  const inlineMatch = rawTitle.match(/^(.+?)[.,]\s*(?:n[°o]\s*)?(\d+)[.,]?\s*(.+)$/i);
+  if (inlineMatch) {
+    const [, series, num, subtitle] = inlineMatch;
+    return `${series.trim()} ${num} - ${subtitle.trim()}`;
+  }
+  // Cas 2 : la série est dans un champ séparé (dc:relation) et le titre est juste le sous-titre.
+  if (seriesRaw && seriesRaw.toLowerCase() !== rawTitle.toLowerCase()) {
+    return `${seriesRaw} - ${rawTitle}`;
+  }
+  // Cas 3 : rien à composer, on garde le titre nettoyé tel quel.
+  return rawTitle;
+}
+
 function parseBnfSru(xmlText) {
   const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
   if (xml.querySelector('parsererror')) return null;
   // Notices renvoyées en Dublin Core (recordSchema=dublincore)
-  const titleEl = xml.querySelector('dc\\:title, title');
-  const authorEl = xml.querySelector('dc\\:creator, creator');
+  const titleEl    = xml.querySelector('dc\\:title, title');
+  const authorEl    = xml.querySelector('dc\\:creator, creator');
   const publisherEl = xml.querySelector('dc\\:publisher, publisher');
-  const dateEl = xml.querySelector('dc\\:date, date');
-  const title = titleEl?.textContent?.trim() || '';
-  const author = authorEl?.textContent?.trim() || '';
+  const dateEl      = xml.querySelector('dc\\:date, date');
+  const relationEl  = xml.querySelector('dc\\:relation, relation');
+
+  const cleanedTitle = cleanBnfTitle(titleEl?.textContent?.trim() || '');
+  const series       = cleanBnfSeries(relationEl?.textContent?.trim() || '');
+  const title        = buildFullTitle(cleanedTitle, series);
+  const author        = cleanBnfAuthor(authorEl?.textContent?.trim() || '');
+
   if (!title && !author) return null;
   return {
     title,
@@ -1567,6 +1620,7 @@ function parseBnfSru(xmlText) {
     year: (dateEl?.textContent || '').match(/\d{4}/)?.[0] || '',
     cover: '',
     source: 'BNF Catalogue général'
+
   };
 }
 
